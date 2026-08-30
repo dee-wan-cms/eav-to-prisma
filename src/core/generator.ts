@@ -11,8 +11,16 @@ import {
 } from "../mappers/relation-mapper";
 import { extractModelsFromPrismaFile } from "../utils/prisma-parser";
 import type { Config } from "../types/config";
-import type { PrismaSchema, PrismaModel } from "../utils/prisma-ast";
-import type { ComponentEntityType } from "../field-config-schema";
+import type { EAVPrismaClient } from "../types/prisma-client";
+import type {
+  PrismaSchema,
+  PrismaModel,
+  PrismaGenerator,
+} from "../utils/prisma-ast";
+import type {
+  ComponentEntityType,
+  ModelConfigType,
+} from "../field-config-schema";
 import fs from "fs/promises";
 import path from "path";
 
@@ -28,12 +36,12 @@ export interface GenerateResult {
 export class Generator {
   private reader: EAVReader | null = null;
   private warnings: string[] = [];
-  private prismaClient: any;
+  private prismaClient: EAVPrismaClient | null;
   private externalModelNames: Set<string> = new Set();
 
   constructor(
     private config: Config,
-    prismaClient?: any
+    prismaClient?: EAVPrismaClient
   ) {
     if (config.input) {
       this.prismaClient = null;
@@ -52,124 +60,127 @@ export class Generator {
   async generate(): Promise<GenerateResult> {
     this.warnings = [];
 
-    try {
-      const externalModels = this.loadExternalModels();
-      this.externalModelNames = new Set(externalModels.map((m) => m.name));
+    const externalModels = this.loadExternalModels();
+    this.externalModelNames = new Set(externalModels.map((m) => m.name));
 
-      let models = await this.readModelsFromSource();
+    let models = await this.readModelsFromSource();
 
-      if (this.config.mapper?.model) {
-        models = models.map((m) => this.config.mapper!.model!(m));
-      }
+    if (this.config.mapper?.model) {
+      models = models.map((m) => this.config.mapper!.model!(m));
+    }
 
-      const components = await this.readComponents();
+    const components = await this.readComponents();
 
-      const schemaBuilderConfig: SchemaBuilderConfig = {
-        convention: this.config.naming?.convention || "PascalCase",
-        prefix: this.config.naming?.prefix,
-        i18nEnabled: this.config.i18n?.enabled || false,
-        i18nTableNaming:
-          this.config.i18n?.tableNaming || "${identifier}_translation",
-        externalModelNames: this.externalModelNames,
+    const schemaBuilderConfig: SchemaBuilderConfig = {
+      convention: this.config.naming?.convention || "PascalCase",
+      prefix: this.config.naming?.prefix,
+      i18nEnabled: this.config.i18n?.enabled || false,
+      i18nTableNaming:
+        this.config.i18n?.tableNaming || "${identifier}_translation",
+      externalModelNames: this.externalModelNames,
+    };
+
+    const prismaModels: PrismaModel[] = [];
+    const junctionTables = new Set<string>();
+
+    for (const model of models) {
+      const fieldsWithoutDerived = model.fields.filter((field) => {
+        if (field.derived) {
+          this.warnings.push(
+            `Skipped derived field "${field.key}" in model "${model.slug}"`
+          );
+          return false;
+        }
+        return true;
+      });
+
+      const modelWithoutDerived = {
+        ...model,
+        fields: fieldsWithoutDerived,
       };
 
-      const prismaModels: PrismaModel[] = [];
-      const junctionTables = new Set<string>();
+      const generated = buildModel(modelWithoutDerived, schemaBuilderConfig);
+      prismaModels.push(...generated);
 
-      for (const model of models) {
-        const fieldsWithoutDerived = model.fields.filter((field: any) => {
-          if (field.derived) {
+      // buildModel always emits the owning model first; the component and
+      // junction tables below are named after it.
+      const rootModel = generated[0];
+      if (!rootModel) {
+        throw new Error(`No Prisma model was built for "${model.slug}"`);
+      }
+
+      for (const field of model.fields) {
+        if (
+          field.type === "component" &&
+          field.config?.type === "component"
+        ) {
+          const componentConfig = field.config;
+          const component = components.get(componentConfig.slug);
+
+          if (!component) {
             this.warnings.push(
-              `Skipped derived field "${field.key}" in model "${model.slug}"`
+              `Component "${componentConfig.slug}" not found for field "${field.key}" in model "${model.slug}"`
             );
-            return false;
+            continue;
           }
-          return true;
-        });
 
-        const modelWithoutDerived = {
-          ...model,
-          fields: fieldsWithoutDerived,
-        };
+          const componentTable = buildComponentTable(
+            rootModel.name,
+            field.key,
+            component,
+            componentConfig.repeatable || false,
+            schemaBuilderConfig,
+            componentConfig.context
+          );
 
-        const generated = buildModel(modelWithoutDerived, schemaBuilderConfig);
-        prismaModels.push(...generated);
+          prismaModels.push(componentTable);
 
-        for (const field of model.fields) {
-          if (
-            field.type === "component" &&
-            field.config?.type === "component"
-          ) {
-            const componentConfig = field.config;
-            const component = components.get(componentConfig.slug);
-
-            if (!component) {
-              this.warnings.push(
-                `Component "${componentConfig.slug}" not found for field "${field.key}" in model "${model.slug}"`
-              );
-              continue;
-            }
-
-            const componentTable = buildComponentTable(
-              generated[0]?.name!,
+          if (schemaBuilderConfig.i18nEnabled) {
+            const translationTable = buildComponentTranslationTable(
+              rootModel.name,
               field.key,
               component,
-              componentConfig.repeatable || false,
-              schemaBuilderConfig,
-              componentConfig.context
-            );
-
-            prismaModels.push(componentTable);
-
-            if (schemaBuilderConfig.i18nEnabled) {
-              const translationTable = buildComponentTranslationTable(
-                generated[0]?.name!,
-                field.key,
-                component,
-                schemaBuilderConfig
-              );
-
-              if (translationTable) {
-                prismaModels.push(translationTable);
-              }
-            }
-          }
-
-          if (needsJunctionTable(field)) {
-            const junctionTable = buildJunctionTable(
-              generated[0]?.name!,
-              field,
               schemaBuilderConfig
             );
 
-            if (!junctionTables.has(junctionTable.name)) {
-              prismaModels.push(junctionTable);
-              junctionTables.add(junctionTable.name);
+            if (translationTable) {
+              prismaModels.push(translationTable);
             }
           }
         }
+
+        if (needsJunctionTable(field)) {
+          const junctionTable = buildJunctionTable(
+            rootModel.name,
+            field,
+            schemaBuilderConfig
+          );
+
+          if (!junctionTables.has(junctionTable.name)) {
+            prismaModels.push(junctionTable);
+            junctionTables.add(junctionTable.name);
+          }
+        }
       }
-
-      const schema: PrismaSchema = {
-        datasource: {
-          provider: this.config.output?.datasource?.provider || "sqlite",
-          url: this.config.output?.datasource?.url || 'env("DATABASE_URL")',
-          directUrl: this.config.output?.datasource?.directUrl,
-        },
-        generators: this.buildGenerators(),
-        models: [...externalModels, ...prismaModels],
-      };
-
-      const schemaString = await writeSchema(schema);
-
-      return {
-        schema: schemaString,
-        componentsGenerated: models.map((m) => m.slug),
-        warnings: this.warnings,
-      };
-    } catch (error) {
-      throw error;
     }
+
+    const schema: PrismaSchema = {
+      datasource: {
+        provider: this.config.output?.datasource?.provider || "sqlite",
+        url: this.config.output?.datasource?.url || 'env("DATABASE_URL")',
+        directUrl: this.config.output?.datasource?.directUrl,
+      },
+      generators: this.buildGenerators(),
+      models: [...externalModels, ...prismaModels],
+    };
+
+    const schemaString = await writeSchema(schema);
+
+    return {
+      schema: schemaString,
+      componentsGenerated: models.map((m) => m.slug),
+      warnings: this.warnings,
+    };
   }
 
   /**
@@ -246,7 +257,7 @@ export class Generator {
   /**
    * Read models from configured source (direct input or database)
    */
-  private async readModelsFromSource(): Promise<any[]> {
+  private async readModelsFromSource(): Promise<ModelConfigType[]> {
     if (this.config.input && "models" in this.config.input) {
       return this.config.input.models;
     }
@@ -278,13 +289,11 @@ export class Generator {
       let components = this.config.input.components;
 
       if (this.config.mapper?.component) {
-        components = components.map((c: any) =>
-          this.config.mapper!.component!(c)
-        );
+        components = components.map((c) => this.config.mapper!.component!(c));
       }
 
       for (const comp of components) {
-        map.set(comp.slug, comp as any);
+        map.set(comp.slug, comp);
       }
       return map;
     }
@@ -295,19 +304,27 @@ export class Generator {
         let components = result.components;
 
         if (this.config.mapper?.component) {
-          components = components.map((c: any) =>
-            this.config.mapper!.component!(c)
-          );
+          components = components.map((c) => this.config.mapper!.component!(c));
         }
 
         for (const comp of components) {
-          map.set(comp.slug, comp as any);
+          map.set(comp.slug, comp);
         }
       }
       return map;
     }
 
     if (!this.config.tables?.components) {
+      return map;
+    }
+
+    // Reachable when `input` supplies models but `tables.components` still names
+    // a component table: there is no client to read it from. Previously this
+    // surfaced as a caught TypeError with the same warning shape.
+    if (!this.prismaClient) {
+      this.warnings.push(
+        "Failed to read components: no Prisma client was provided"
+      );
       return map;
     }
 
@@ -324,7 +341,7 @@ export class Generator {
       }
 
       for (const comp of components) {
-        map.set(comp.slug, comp as any);
+        map.set(comp.slug, comp);
       }
     } catch (error) {
       this.warnings.push(
@@ -356,7 +373,7 @@ export class Generator {
   private buildGenerators() {
     const generators = [];
 
-    const clientGenerator: any = {
+    const clientGenerator: PrismaGenerator = {
       name: "client",
       provider: "prisma-client-js",
       output: this.config.output?.clientPath,

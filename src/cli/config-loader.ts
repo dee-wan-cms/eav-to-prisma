@@ -1,8 +1,14 @@
 // src/cli/config-loader.ts
 
-import { Config, ConfigSchema } from '../types/config';
+import { ConfigSchema } from '../types/config';
+import type { Config } from '../types/config';
 import { pathToFileURL } from 'url';
 import path from 'path';
+
+function isModuleNotFoundError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false;
+  return error.code === 'MODULE_NOT_FOUND' || error.code === 'ERR_MODULE_NOT_FOUND';
+}
 
 /**
  * Load and validate config file
@@ -22,7 +28,7 @@ export async function loadConfig(configPath: string): Promise<Config> {
     
     return validated;
   } catch (error) {
-    if ((error as any).code === 'MODULE_NOT_FOUND' || (error as any).code === 'ERR_MODULE_NOT_FOUND') {
+    if (isModuleNotFoundError(error)) {
       throw new Error(
         `Config file not found: ${configPath}\nRun 'eav-to-prisma init' to create one.`
       );

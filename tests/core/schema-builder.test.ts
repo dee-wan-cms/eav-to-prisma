@@ -2,7 +2,29 @@
 
 import { describe, it, expect } from "vitest";
 import { SchemaBuilderConfig, buildModel } from "../../src/core/schema-builder";
-import { ModelConfigType } from "../../src/field-config-schema";
+import {
+  ModelConfigType,
+  FieldDefinitionType,
+} from "../../src/field-config-schema";
+
+const relationField = (
+  key: string,
+  relationType: "oneToOne" | "manyToOne" | "oneToMany" | "manyToMany",
+  targetModel: string
+): FieldDefinitionType => ({
+  key,
+  label: key,
+  type: "relation",
+  required: false,
+  config: {
+    type: "relation",
+    relationType,
+    targetModel,
+    displayField: "name",
+    cascade: "restrict",
+  },
+});
+
 
 // FIXED: Changed from snake_case to PascalCase
 const baseConfig: SchemaBuilderConfig = {
@@ -482,6 +504,137 @@ describe("buildModel - Indexes", () => {
 
     const mainModel = result[0];
     expect(mainModel.indexes).toContainEqual(["status", "published_at"]);
+  });
+
+  it("indexes the scalar column of a manyToOne relation", () => {
+    const model: ModelConfigType = {
+      slug: "post",
+      name: "Post",
+      fields: [
+        relationField("author", "manyToOne", "user"),
+        relationField("section", "manyToOne", "section"),
+      ],
+    };
+
+    const result = buildModel(model, baseConfig);
+
+    expect(result[0].indexes).toEqual([["author_id"], ["section_id"]]);
+  });
+
+  it("does not index list relations, which own no scalar column", () => {
+    const model: ModelConfigType = {
+      slug: "post",
+      name: "Post",
+      fields: [
+        relationField("comments", "oneToMany", "comment"),
+        relationField("categories", "manyToMany", "category"),
+      ],
+    };
+
+    const result = buildModel(model, baseConfig);
+
+    expect(result[0].indexes).toEqual([]);
+  });
+
+  it("leaves the oneToOne column to its @unique instead of a second index", () => {
+    const model: ModelConfigType = {
+      slug: "post",
+      name: "Post",
+      fields: [relationField("profile", "oneToOne", "profile")],
+    };
+
+    const result = buildModel(model, baseConfig);
+
+    expect(result[0].indexes).toEqual([]);
+    expect(result[0].fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "profile_id",
+          attributes: ["@unique"],
+        }),
+      ])
+    );
+  });
+
+  it("deduplicates a relation index colliding with the sortField", () => {
+    const model: ModelConfigType = {
+      slug: "post",
+      name: "Post",
+      fields: [relationField("author", "manyToOne", "user")],
+      settings: {
+        sortField: "author_id",
+      },
+    };
+
+    const result = buildModel(model, baseConfig);
+
+    expect(result[0].indexes).toEqual([["author_id"]]);
+  });
+
+  it("emits sortField, status composite and relation indexes in a stable order", () => {
+    const model: ModelConfigType = {
+      slug: "post",
+      name: "Post",
+      fields: [
+        relationField("author", "manyToOne", "user"),
+        {
+          key: "status",
+          label: "Status",
+          type: "select",
+          required: true,
+          translatable: false,
+          config: {
+            type: "select",
+            options: ["draft", "published"],
+          },
+        },
+        {
+          key: "published_at",
+          label: "Published At",
+          type: "date",
+          required: false,
+          translatable: false,
+        },
+      ],
+      settings: {
+        sortField: "published_at",
+      },
+    };
+
+    const first = buildModel(model, baseConfig)[0];
+    const second = buildModel(model, baseConfig)[0];
+
+    expect(first.indexes).toEqual([
+      ["published_at"],
+      ["status", "published_at"],
+      ["author_id"],
+    ]);
+    expect(second.indexes).toEqual(first.indexes);
+  });
+
+  it("indexes relation columns with i18n enabled and preserves the translation unique", () => {
+    const model: ModelConfigType = {
+      slug: "post",
+      name: "Post",
+      fields: [
+        {
+          key: "title",
+          label: "Title",
+          type: "text",
+          required: true,
+          translatable: true,
+        },
+        relationField("author", "manyToOne", "user"),
+      ],
+    };
+
+    const [mainModel, translationModel] = buildModel(model, {
+      ...baseConfig,
+      i18nEnabled: true,
+    });
+
+    expect(mainModel.indexes).toEqual([["author_id"]]);
+    expect(translationModel.unique).toEqual([["post_id", "lang"]]);
   });
 });
 

@@ -15,7 +15,7 @@ describe('EAVReader', () => {
 
   beforeEach(() => {
     mockPrisma = createMockPrisma();
-    reader = new EAVReader(mockPrisma as any, 'content_model');
+    reader = new EAVReader(mockPrisma, 'content_model');
   });
 
   describe('readModels', () => {
@@ -220,7 +220,7 @@ describe('EAVReader', () => {
       });
 
       const customReader = new EAVReader(
-        mockPrisma as any,
+        mockPrisma,
         'content_model',
         mapper
       );
@@ -261,7 +261,7 @@ describe('EAVReader', () => {
       };
 
       const customReader = new EAVReader(
-        mockPrisma as any,
+        mockPrisma,
         'content_model',
         asyncMapper
       );

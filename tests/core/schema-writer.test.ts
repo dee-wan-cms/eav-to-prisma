@@ -8,6 +8,8 @@ import {
 } from '../../src/core/schema-writer';
 import { PrismaDatasource, PrismaGenerator, PrismaModel, PrismaSchema } from '../../src/utils/prisma-ast';
 import { expectLine } from '../test-helpers';
+import { buildModel, SchemaBuilderConfig } from '../../src/core/schema-builder';
+import { ModelConfigType, FieldDefinitionType } from '../../src/field-config-schema';
 
 describe('writeDatasource', () => {
   it('writes datasource with env variable', () => {
@@ -375,5 +377,74 @@ describe('writeSchema', () => {
     expect(result).toContain('model User {');
     expect(result).toContain('model Post {');
     expect(result).toContain('@@index([author_id])');
+  });
+});
+describe('writeModel - relation scalar indexes', () => {
+  const relationField = (
+    key: string,
+    relationType: 'oneToOne' | 'manyToOne' | 'oneToMany' | 'manyToMany',
+    targetModel: string
+  ): FieldDefinitionType => ({
+    key,
+    label: key,
+    type: 'relation',
+    required: false,
+    config: {
+      type: 'relation',
+      relationType,
+      targetModel,
+      displayField: 'name',
+      cascade: 'restrict'
+    }
+  });
+
+  const builderConfig: SchemaBuilderConfig = {
+    convention: 'PascalCase',
+    i18nEnabled: false,
+    i18nTableNaming: '${identifier}_translation'
+  };
+
+  it('emits @@index for each owning scalar relation column', () => {
+    const model: ModelConfigType = {
+      slug: 'post',
+      name: 'Post',
+      fields: [
+        relationField('author', 'manyToOne', 'user'),
+        relationField('section', 'manyToOne', 'section')
+      ]
+    };
+
+    const result = writeModel(buildModel(model, builderConfig)[0]);
+
+    expect(result).toContain('@@index([author_id])');
+    expect(result).toContain('@@index([section_id])');
+  });
+
+  it('emits the @unique column without a duplicate @@index', () => {
+    const model: ModelConfigType = {
+      slug: 'post',
+      name: 'Post',
+      fields: [relationField('profile', 'oneToOne', 'profile')]
+    };
+
+    const result = writeModel(buildModel(model, builderConfig)[0]);
+
+    expectLine(result, 'profile_id String? @unique');
+    expect(result).not.toContain('@@index([profile_id])');
+  });
+
+  it('emits no @@index for list relations', () => {
+    const model: ModelConfigType = {
+      slug: 'post',
+      name: 'Post',
+      fields: [
+        relationField('comments', 'oneToMany', 'comment'),
+        relationField('categories', 'manyToMany', 'category')
+      ]
+    };
+
+    const result = writeModel(buildModel(model, builderConfig)[0]);
+
+    expect(result).not.toContain('@@index(');
   });
 });

@@ -226,6 +226,21 @@ function extractDefaultValue(attr: string): string | number | boolean | undefine
   return value;
 }
 
+type ReferentialAction = NonNullable<
+  NonNullable<PrismaField['relation']>['onDelete']
+>;
+
+const REFERENTIAL_ACTIONS: readonly ReferentialAction[] = [
+  'Cascade',
+  'SetNull',
+  'Restrict',
+  'NoAction'
+];
+
+function toReferentialAction(value: string): ReferentialAction | undefined {
+  return REFERENTIAL_ACTIONS.find((action) => action === value);
+}
+
 function parseRelation(attr: string): PrismaField['relation'] | undefined {
   const relation: PrismaField['relation'] = {
     fields: [],
@@ -244,16 +259,16 @@ function parseRelation(attr: string): PrismaField['relation'] | undefined {
   
   const onDeleteMatch = attr.match(/onDelete:\s*(\w+)/);
   if (onDeleteMatch?.[1]) {
-    const value = onDeleteMatch[1] as any;
-    if (['Cascade', 'SetNull', 'Restrict', 'NoAction'].includes(value)) {
+    const value = toReferentialAction(onDeleteMatch[1]);
+    if (value) {
       relation.onDelete = value;
     }
   }
   
   const onUpdateMatch = attr.match(/onUpdate:\s*(\w+)/);
   if (onUpdateMatch?.[1]) {
-    const value = onUpdateMatch[1] as any;
-    if (['Cascade', 'SetNull', 'Restrict', 'NoAction'].includes(value)) {
+    const value = toReferentialAction(onUpdateMatch[1]);
+    if (value) {
       relation.onUpdate = value;
     }
   }

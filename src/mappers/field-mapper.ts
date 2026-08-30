@@ -36,7 +36,7 @@ export function mapFieldToPrisma(
     case "component":
       return mapComponentField(field, config);
     default:
-      throw new Error(`Unknown field type: ${(field as any).type}`);
+      throw new Error(`Unknown field type: ${field.type}`);
   }
 }
 

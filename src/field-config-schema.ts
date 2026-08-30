@@ -11,6 +11,11 @@ export const RESERVED_FIELD_KEYS = {
 	SYSTEM: ['id', 'created_at', 'updated_at'] as const
 } as const;
 
+// `includes` on the `as const` tuples above only accepts their own literals;
+// these widened views let a caller's arbitrary string be tested against them.
+const SYSTEM_RESERVED_KEYS: readonly string[] = RESERVED_FIELD_KEYS.SYSTEM;
+const AB_TESTING_RESERVED_KEYS: readonly string[] = RESERVED_FIELD_KEYS.COMPONENT_AB_TESTING;
+
 export const VALIDATION_PATTERNS = {
 	SLUG: /^[a-z][a-z0-9_-]*$/
 } as const;
@@ -165,7 +170,7 @@ export const FieldDefinitionSchema = z
 			.string()
 			.min(1)
 			.regex(VALIDATION_PATTERNS.SLUG)
-			.refine((key) => !RESERVED_FIELD_KEYS.SYSTEM.includes(key as any), {
+			.refine((key) => !SYSTEM_RESERVED_KEYS.includes(key), {
 				message: VALIDATION_MESSAGES.RESERVED_FIELD_KEY
 			}),
 		label: z.string().min(1),
@@ -220,7 +225,7 @@ export const ComponentEntitySchema = z
 	.refine(
 		(component) => {
 			const hasReservedABFields = component.fields.some((f) =>
-				RESERVED_FIELD_KEYS.COMPONENT_AB_TESTING.includes(f.key as any)
+				AB_TESTING_RESERVED_KEYS.includes(f.key)
 			);
 			return !hasReservedABFields;
 		},
@@ -238,9 +243,9 @@ export function getValidationErrors(errors: z.ZodError): string[] {
 }
 
 export function isReservedFieldKey(key: string, context: 'component' | 'model' = 'model'): boolean {
-	const systemReserved = RESERVED_FIELD_KEYS.SYSTEM.includes(key as any);
+	const systemReserved = SYSTEM_RESERVED_KEYS.includes(key);
 	const abReserved =
-		context === 'component' && RESERVED_FIELD_KEYS.COMPONENT_AB_TESTING.includes(key as any);
+		context === 'component' && AB_TESTING_RESERVED_KEYS.includes(key);
 
 	return systemReserved || abReserved;
 }

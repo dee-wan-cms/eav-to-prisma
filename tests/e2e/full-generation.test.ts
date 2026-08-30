@@ -1,7 +1,7 @@
 // tests/e2e/full-generation.test.ts
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { Config } from "../../src/types/config";
+import type { Config } from "../../src/types/config";
 import { Generator } from "../../src/core/generator";
 import { expectLine } from "../test-helpers";
 
@@ -12,10 +12,9 @@ const mockPrismaClient = {
   },
   component: {
     findMany: vi.fn(),
+    findFirst: vi.fn(),
   },
   $disconnect: vi.fn(),
-  $connect: vi.fn(),
-  $queryRaw: vi.fn(),
 };
 
 const config: Config = {
@@ -209,7 +208,7 @@ describe("Full Schema Generation E2E", () => {
     mockPrismaClient.content_model.findMany.mockResolvedValue(models);
     mockPrismaClient.component.findMany.mockResolvedValue(components);
 
-    const generator = new Generator(config, mockPrismaClient as any);
+    const generator = new Generator(config, mockPrismaClient);
     const result = await generator.generate();
 
     // Verify datasource
@@ -283,7 +282,7 @@ describe("Full Schema Generation E2E", () => {
     // No components
     mockPrismaClient.component.findMany.mockResolvedValue([]);
 
-    const generator = new Generator(config, mockPrismaClient as any);
+    const generator = new Generator(config, mockPrismaClient);
     const result = await generator.generate();
 
     expectLine(result.schema, "model Simple {");
@@ -326,7 +325,7 @@ describe("Full Schema Generation E2E", () => {
     mockPrismaClient.content_model.findMany.mockResolvedValue(models);
     mockPrismaClient.component.findMany.mockResolvedValue([]);
 
-    const generator = new Generator(config, mockPrismaClient as any);
+    const generator = new Generator(config, mockPrismaClient);
     const result = await generator.generate();
 
     // Check that warning exists - exact format comes from generator.ts line 108
@@ -334,5 +333,168 @@ describe("Full Schema Generation E2E", () => {
     expect(result.warnings[0]).toContain('Component "hero" not found');
     expect(result.warnings[0]).toContain('field "hero"');
     expect(result.warnings[0]).toContain('model "post"');
+  });
+});
+
+describe("Full Schema Generation E2E - relation indexes", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const modelBlock = (schema: string, name: string): string[] => {
+    const lines = schema.split("\n");
+    const start = lines.findIndex((line) => line.trim() === `model ${name} {`);
+
+    if (start === -1) {
+      throw new Error(`Model "${name}" not found in schema:\n${schema}`);
+    }
+
+    const end = lines.findIndex((line, i) => i > start && line.trim() === "}");
+
+    return lines
+      .slice(start + 1, end)
+      .map((line) => line.trim().replace(/\s+/g, " "))
+      .filter((line) => line.length > 0);
+  };
+
+  it("indexes only owning scalar relation columns across every relation type", async () => {
+    const models = [
+      {
+        id: "1",
+        slug: "article",
+        definition: JSON.stringify({
+          slug: "article",
+          name: "Article",
+          fields: [
+            {
+              key: "title",
+              label: "Title",
+              type: "text",
+              required: false,
+              translatable: true,
+            },
+            {
+              key: "author",
+              label: "Author",
+              type: "relation",
+              required: false,
+              config: {
+                type: "relation",
+                relationType: "manyToOne",
+                targetModel: "user",
+                displayField: "name",
+                cascade: "restrict",
+              },
+            },
+            {
+              key: "section",
+              label: "Section",
+              type: "relation",
+              required: false,
+              config: {
+                type: "relation",
+                relationType: "manyToOne",
+                targetModel: "section",
+                displayField: "name",
+                cascade: "restrict",
+              },
+            },
+            {
+              key: "profile",
+              label: "Profile",
+              type: "relation",
+              required: false,
+              config: {
+                type: "relation",
+                relationType: "oneToOne",
+                targetModel: "profile",
+                displayField: "name",
+                cascade: "cascade",
+              },
+            },
+            {
+              key: "comments",
+              label: "Comments",
+              type: "relation",
+              required: false,
+              config: {
+                type: "relation",
+                relationType: "oneToMany",
+                targetModel: "comment",
+                displayField: "body",
+                cascade: "cascade",
+              },
+            },
+            {
+              key: "tags",
+              label: "Tags",
+              type: "relation",
+              required: false,
+              config: {
+                type: "relation",
+                relationType: "manyToMany",
+                targetModel: "tag",
+                displayField: "name",
+                cascade: "restrict",
+              },
+            },
+          ],
+          settings: {
+            sortField: "author_id",
+          },
+        }),
+      },
+    ];
+
+    mockPrismaClient.content_model.findMany.mockResolvedValue(models);
+    mockPrismaClient.component.findMany.mockResolvedValue([]);
+
+    const generator = new Generator(config, mockPrismaClient);
+    const result = await generator.generate();
+
+    expect(result.schema.match(/^model .+ \{$/gm)).toEqual([
+      "model Article {",
+      "model ArticleTranslation {",
+      "model ArticleTag {",
+    ]);
+
+    expect(modelBlock(result.schema, "Article")).toEqual([
+      "id String @id @default(cuid())",
+      "author_id String?",
+      "section_id String?",
+      "profile_id String? @unique",
+      "comments Comment[]",
+      "tags Tag[]",
+      "created_at DateTime @default(now())",
+      "updated_at DateTime @updatedAt",
+      "translations ArticleTranslation[]",
+      "@@index([author_id])",
+      "@@index([section_id])",
+    ]);
+
+    expect(modelBlock(result.schema, "ArticleTranslation")).toEqual([
+      "id String @id @default(cuid())",
+      "article_id String",
+      "lang String",
+      "title String?",
+      "article Article @relation(fields: [article_id], references: [id], onDelete: Cascade)",
+      "@@unique([article_id, lang])",
+      '@@map("article_translation")',
+    ]);
+
+    expect(modelBlock(result.schema, "ArticleTag")).toEqual([
+      "id String @id @default(cuid())",
+      "article_id String",
+      "tag_id String",
+      "order Int?",
+      "created_at DateTime @default(now())",
+      "article Article @relation(fields: [article_id], references: [id], onDelete: Restrict)",
+      "tag Tag @relation(fields: [tag_id], references: [id], onDelete: Cascade)",
+      "@@index([article_id])",
+      "@@index([tag_id])",
+      "@@unique([article_id, tag_id])",
+    ]);
+
+    expect(result.warnings).toHaveLength(0);
   });
 });

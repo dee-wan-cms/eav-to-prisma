@@ -162,7 +162,7 @@ function writeFieldAligned(field: PrismaField, nameWidth: number, typeWidth: num
 }
 
 function formatFieldType(field: PrismaField): string {
-  let type = field.type;
+  const type = field.type;
   
   // List fields are NEVER optional in Prisma
   if (field.list) {
@@ -205,7 +205,7 @@ function formatRelation(relation: PrismaField['relation']): string {
   return `@relation(${parts.join(', ')})`;
 }
 
-function formatConfigValue(value: any): string {
+function formatConfigValue(value: unknown): string {
   if (typeof value === 'string') {
     return `"${value}"`;
   }

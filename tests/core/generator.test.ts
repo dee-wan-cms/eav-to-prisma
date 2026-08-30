@@ -9,6 +9,7 @@ const createMockPrisma = () => ({
   },
   component: {
     findMany: vi.fn(),
+    findFirst: vi.fn(),
   },
   $disconnect: vi.fn(),
 });
@@ -32,7 +33,7 @@ describe("Generator", () => {
         },
       };
 
-      expect(() => new Generator(config, mockPrisma as any)).not.toThrow();
+      expect(() => new Generator(config, mockPrisma)).not.toThrow();
     });
 
     it("creates generator with direct input", () => {
@@ -287,7 +288,7 @@ describe("Generator", () => {
                   type: "text",
                   required: false,
                   derived: true,
-                } as any,
+                },
               ],
             },
           ],

@@ -22,7 +22,7 @@ export interface PrismaGenerator {
   name: string;
   provider: string;
   output?: string;
-  config?: Record<string, any>;
+  config?: Record<string, unknown>;
 }
 
 export interface PrismaModel {

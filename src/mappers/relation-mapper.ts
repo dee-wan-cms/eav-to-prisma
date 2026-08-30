@@ -104,3 +104,46 @@ export function buildJunctionTableName(
   // PascalCase: PostCategory
   return `${fromModel}${toModel}`;
 }
+/**
+ * The scalar foreign-key column this model owns for a relation field.
+ * Only oneToOne and manyToOne own one; list sides own no column on this model.
+ */
+export function relationScalarColumn(field: FieldDefinitionType): string | null {
+  if (field.type !== 'relation' || field.config?.type !== 'relation') {
+    return null;
+  }
+
+  const { relationType } = field.config;
+
+  if (relationType !== 'oneToOne' && relationType !== 'manyToOne') {
+    return null;
+  }
+
+  return `${field.key}_id`;
+}
+
+/**
+ * oneToOne emits its scalar column with `@unique`, which is already a unique
+ * index on every supported provider; a second plain index would be redundant.
+ */
+export function relationScalarNeedsIndex(field: FieldDefinitionType): boolean {
+  if (relationScalarColumn(field) === null) {
+    return false;
+  }
+
+  return field.config?.type === 'relation' && field.config.relationType === 'manyToOne';
+}
+
+/**
+ * Scalar relation columns needing an explicit `@@index`, in field order.
+ */
+export function relationIndexColumns(fields: FieldDefinitionType[]): string[] {
+  return fields.flatMap((field) => {
+    if (!relationScalarNeedsIndex(field)) {
+      return [];
+    }
+
+    const column = relationScalarColumn(field);
+    return column ? [column] : [];
+  });
+}

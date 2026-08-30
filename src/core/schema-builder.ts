@@ -1,6 +1,7 @@
 import type { PrismaModel, PrismaField } from "../utils/prisma-ast";
 import { mapFieldToPrisma } from "../mappers/field-mapper";
 import { toPascalCase, toSnakeCase } from "../utils/naming";
+import { relationIndexColumns } from "../mappers/relation-mapper";
 import type {
   ModelConfigType,
   FieldDefinitionType,
@@ -198,16 +199,31 @@ function buildIndexes(
   settings?: ModelConfigType["settings"]
 ): string[][] {
   const indexes: string[][] = [];
+  const seen = new Set<string>();
+
+  // First declaration of a column set wins, so the order below is the emitted order.
+  const add = (columns: string[]): void => {
+    const key = columns.join(",");
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    indexes.push(columns);
+  };
 
   if (settings?.sortField) {
-    indexes.push([settings.sortField]);
+    add([settings.sortField]);
   }
 
   const hasStatus = fields.some((f) => f.key === "status");
   const hasPublishedAt = fields.some((f) => f.key === "published_at");
 
   if (hasStatus && hasPublishedAt) {
-    indexes.push(["status", "published_at"]);
+    add(["status", "published_at"]);
+  }
+
+  for (const column of relationIndexColumns(fields)) {
+    add([column]);
   }
 
   return indexes;

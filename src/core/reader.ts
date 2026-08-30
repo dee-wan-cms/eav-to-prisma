@@ -2,23 +2,20 @@
 
 import { ModelConfigSchema,  getValidationErrors } from '../field-config-schema';
 import type { ModelConfigType } from '../field-config-schema';
+import { getModelDelegate } from '../types/prisma-client';
+import type { EAVDatabaseRow, EAVPrismaClient } from '../types/prisma-client';
 import { ZodError } from 'zod';
 
-export interface EAVDatabaseRow {
-  id: string;
-  slug: string;
-  definition: string; // JSON string (default structure)
-  [key: string]: any; // Allow custom columns
-}
+export type { EAVDatabaseRow } from '../types/prisma-client';
 
-export type MapperFunction = (row: any, prisma?: any) => any | Promise<any>;
+export type MapperFunction = (row: EAVDatabaseRow, prisma?: EAVPrismaClient) => unknown;
 
 /**
  * Read EAV model definitions from database
  */
 export class EAVReader {
   constructor(
-    private prisma: any, // Prisma Client instance
+    private prisma: EAVPrismaClient,
     private tableName: string = 'content_model',
     private mapper?: MapperFunction
   ) {}
@@ -29,7 +26,7 @@ export class EAVReader {
   async readModels(): Promise<ModelConfigType[]> {
     try {
       // Query database for model definitions
-      const rows: EAVDatabaseRow[] = await this.prisma[this.tableName].findMany();
+      const rows: EAVDatabaseRow[] = await getModelDelegate(this.prisma, this.tableName).findMany();
 
       if (rows.length === 0) {
         return [];
@@ -82,9 +79,10 @@ export class EAVReader {
    */
   async readModel(slug: string): Promise<ModelConfigType | null> {
     try {
-      const row: EAVDatabaseRow | null = await this.prisma[this.tableName].findFirst({
-        where: { slug }
-      });
+      const row: EAVDatabaseRow | null = await getModelDelegate(
+        this.prisma,
+        this.tableName
+      ).findFirst({ where: { slug } });
 
       if (!row) {
         return null;
@@ -116,7 +114,7 @@ export class EAVReader {
   /**
    * Default mapper - expects JSON in 'definition' column
    */
-  private defaultMapper(row: EAVDatabaseRow): any {
+  private defaultMapper(row: EAVDatabaseRow): unknown {
     return JSON.parse(row.definition);
   }
 
