@@ -1,6 +1,7 @@
 // src/utils/zod-comments.ts
 
 import type { FieldValidationType } from '../field-config-schema';
+import { compileValidationPattern } from './validation-pattern';
 
 /**
  * Generate Zod comment for prisma-zod-generator
@@ -24,7 +25,7 @@ export function buildZodComment(validation?: FieldValidationType): string | unde
   if (validation.cuid) {
     parts.push('cuid()');
   }
-  
+
   // Then constraint validations
   if (validation.minLength !== undefined) {
     parts.push(`min(${validation.minLength})`);
@@ -33,7 +34,9 @@ export function buildZodComment(validation?: FieldValidationType): string | unde
     parts.push(`max(${validation.maxLength})`);
   }
   if (validation.pattern) {
-    parts.push(`regex(/${validation.pattern}/)`);
+    const pattern = compileValidationPattern(validation.pattern);
+    if (pattern === null) throw new Error('Invalid validation pattern');
+    parts.push(`regex(/${pattern.source}/${pattern.flags})`);
   }
 
   // Number validations
