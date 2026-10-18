@@ -27,6 +27,7 @@ export function mapFieldToPrisma(
       return [mapDateField(field)];
     case "select":
       return [mapSelectField(field)];
+    case "point":
     case "json":
       return [mapJsonField(field)];
     case "media":
@@ -90,7 +91,7 @@ function mapBooleanField(field: FieldDefinitionType): PrismaField {
 function mapDateField(field: FieldDefinitionType): PrismaField {
   return {
     name: field.key,
-    type: "DateTime",
+    type: field.config?.type === "date" && field.config.withTimezone === true ? "String" : "DateTime",
     optional: !field.required,
     validation: field.validation,
   };

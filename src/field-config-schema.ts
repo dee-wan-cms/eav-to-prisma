@@ -38,7 +38,8 @@ export const FieldTypeEnum = z.enum([
 	'boolean',
 	'date',
 	'select',
-	'component'
+	'component',
+	'point'
 ]);
 
 /**
@@ -119,6 +120,7 @@ const RelationConfigSchema = z.object({
 }).passthrough();
 
 const DateConfigSchema = z.object({
+	withTimezone: z.boolean().optional(),
 	format: z.enum(['date', 'datetime', 'time']).default('date'),
 	default: z.string().optional()
 }).passthrough();
@@ -155,7 +157,8 @@ export const FieldConfigSchema = z.discriminatedUnion('type', [
 	z.object({ type: z.literal('media'), ...MediaConfigSchema.shape }),
 	z.object({ type: z.literal('relation'), ...RelationConfigSchema.shape }),
 	z.object({ type: z.literal('component'), ...ComponentConfigSchema.shape }),
-	z.object({ type: z.literal('date'), ...DateConfigSchema.shape })
+	z.object({ type: z.literal('date'), ...DateConfigSchema.shape }),
+	z.object({ type: z.literal('point') })
 ]);
 
 export type FieldConfigType = z.infer<typeof FieldConfigSchema>;
